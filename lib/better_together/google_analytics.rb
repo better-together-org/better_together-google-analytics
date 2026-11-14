@@ -30,8 +30,15 @@ module BetterTogether
       end
     end
 
+    def register_consent!
+      return unless BetterTogether.respond_to?(:register_consent_provider)
+
+      BetterTogether.register_consent_provider(:google_analytics) { |platform| HeadTags.consent_needed?(platform) }
+    end
+
     def register!
       register_settings!
+      register_consent!
       return unless BetterTogether.respond_to?(:register_head_tag_provider)
       return unless BetterTogether.respond_to?(:register_content_security_policy_sources)
 
