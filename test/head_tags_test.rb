@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-require 'minitest/autorun'
+require_relative 'test_helper'
 require 'better_together/google_analytics/head_tags'
 
 class BetterTogetherGoogleAnalyticsHeadTagsTest < Minitest::Test
