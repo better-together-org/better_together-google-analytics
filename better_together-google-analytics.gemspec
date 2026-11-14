@@ -10,7 +10,7 @@ Gem::Specification.new do |spec|
   spec.authors       = ['Robert JJ Smith']
   spec.email         = ['rob@bettertogethersolutions.com']
   spec.summary       = 'Google Analytics provider gem for Better Together.'
-  spec.description   = 'Registers Google Analytics head tags and CSP sources for Better Together host apps without duplicating host-app view partials.'
+  spec.description   = 'Registers Google Analytics head tags, CSP sources, consent and cookie policy entries for Better Together host apps.'
   spec.homepage      = 'https://github.com/better-together-org'
   spec.license       = 'LGPL-3.0-or-later'
   spec.required_ruby_version = '>= 3.2'
@@ -20,8 +20,5 @@ Gem::Specification.new do |spec|
 
   spec.add_dependency 'better_together', '>= 0.11.0'
 
-  spec.add_development_dependency 'minitest', '~> 5.20'
-  spec.add_development_dependency 'rake', '~> 13.0'
-  spec.add_development_dependency 'rubocop', '~> 1.60'
   spec.metadata['rubygems_mfa_required'] = 'true'
 end

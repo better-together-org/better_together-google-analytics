@@ -9,3 +9,11 @@ Style/Documentation:
   Enabled: false
 Layout/LineLength:
   Max: 140
+Naming/FileName:
+  Exclude:
+    - lib/better_together-google-analytics.rb
+Metrics/ModuleLength:
+  Max: 140
+Metrics/BlockLength:
+  Exclude:
+    - spec/**/*
