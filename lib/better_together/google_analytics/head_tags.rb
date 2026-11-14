@@ -2,6 +2,7 @@
 
 require 'erb'
 require 'json'
+require 'better_together/google_analytics/visit_script'
 
 module BetterTogether
   module GoogleAnalytics
@@ -14,7 +15,7 @@ module BetterTogether
       def render(view_context)
         platform = current_platform(view_context)
         gtag_id = measurement_id(platform)
-        return unless gtag_id && render_for?(view_context, platform)
+        return unless gtag_id && render_for?(view_context, platform) && tracking_allowed?(view_context)
 
         nonce = view_context.content_security_policy_nonce
         options = tag_options(platform).merge(policy_version: policy_version(view_context, platform))
@@ -87,6 +88,14 @@ module BetterTogether
         true
       end
 
+      # Community Engine decides which pages may go to outside vendors (conversations, private
+      # records, sign-in and token URLs are excluded). Older engines lack the helper; they allow.
+      def tracking_allowed?(view_context)
+        return true unless view_context.respond_to?(:third_party_tracking_allowed?)
+
+        view_context.third_party_tracking_allowed?
+      end
+
       def staging?(view_context)
         host = view_context.respond_to?(:request) ? view_context.request&.host.to_s : ''
         STAGING_HOST.match?(host)
@@ -132,7 +141,7 @@ module BetterTogether
       end
 
       def bootstrap_js(gtag_id, anonymize_ip: true, respect_dnt: false, consent_required: false, policy_version: nil)
-        config = { anonymize_ip: anonymize_ip }.to_json
+        config = { anonymize_ip: anonymize_ip, send_page_view: false }.to_json
         <<~JS
           window.GA_ID = #{gtag_id.to_json};
           window.dataLayer = window.dataLayer || [];
@@ -141,6 +150,7 @@ module BetterTogether
           #{consent_js(policy_version) if consent_required}
           gtag('js', new Date());
           gtag('config', #{gtag_id.to_json}, #{config});
+          #{VisitScript.render(gtag_id, respect_dnt)}
           window.addEventListener('better_together:share', function(event) {
             var detail = event && event.detail ? event.detail : {};
             var method = detail.platform;

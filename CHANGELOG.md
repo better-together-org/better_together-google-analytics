@@ -5,6 +5,7 @@ All notable changes to this gem are recorded here. Format: Keep a Changelog, ver
 ## [Unreleased]
 
 ### Added
+- Respects Community Engine's `third_party_tracking_allowed?`: no tag on conversations, private records, sign-in and token pages. Page views are sent per Turbo visit after checking the `bt-third-party-tracking` meta tag, with token parameters removed from the reported address and `ga-disable-<id>` set while a visit is in flight.
 - LICENSE (LGPL-3.0-or-later, matching the gemspec).
 - CI workflow, Rakefile and Rubocop config.
 - Test support skeleton (`test/support/fake_platform.rb`) for two-platform specs.

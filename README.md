@@ -23,6 +23,14 @@ Needs a Community Engine with the consent system (`register_consent_provider`, `
 
 After upgrading, remove any inline GA partial (`_custom_head_javascript`) from the host app so the tag is not sent twice.
 
+## Private pages are never measured
+
+Needs a Community Engine with `third_party_tracking_allowed?` ([community-engine-rails#2237](https://github.com/better-together-org/community-engine-rails/pull/2237)). The gem renders nothing, and sends no page views, on pages Community Engine excludes: conversations and messages, notifications, settings and dashboards, sign-in and password flows, URLs that carry a token, error responses, non-public platforms and non-public records, plus any rule a host app registers with `BetterTogether.register_third_party_tracking_exclusion`.
+
+Page views are sent by the gem, not by `gtag('config')`, so each Turbo visit is checked against the page's `bt-third-party-tracking` meta tag. Measurement is switched off the moment a visit starts and back on only when the new page allows it. Token query parameters (`invitation_code`, `token`, `reset_password_token` and similar) are removed from the reported address.
+
+In Google Analytics, turn off **Enhanced measurement, Page changes based on browser history events**. The gem reports page views itself, and the browser Back button can still trigger Google's own history listener before the gem can switch it off. With older Community Engine versions the gem behaves as before (the check passes), apart from sending page views itself.
+
 ## Development
 
 ```bash
