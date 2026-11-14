@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 require_relative 'test_helper'
-require 'better_together/google_analytics/head_tags'
+require 'better_together/google_analytics'
 
 class BetterTogetherGoogleAnalyticsHeadTagsTest < Minitest::Test
   FakeViewContext = Struct.new(:nonce) do
@@ -21,6 +21,8 @@ class BetterTogetherGoogleAnalyticsHeadTagsTest < Minitest::Test
       parts.join(separator)
     end
   end
+
+  include ConsentSystemHelper
 
   def with_gtag_id(value)
     original = ENV.fetch('GTAG_ID', nil)
@@ -68,6 +70,8 @@ class BetterTogetherGoogleAnalyticsPerPlatformTest < Minitest::Test
     def permitted_to?(_identifier, _platform) = allowed
   end
 
+  include ConsentSystemHelper
+
   def platform(values = {})
     FakePlatform::SettingPlatform.new(values)
   end
@@ -107,11 +111,11 @@ class BetterTogetherGoogleAnalyticsPerPlatformTest < Minitest::Test
     assert render(platform(values), user: Steward.new(false))
   end
 
-  def test_consent_required_sets_denied_defaults
-    values = { 'google_analytics.measurement_id' => 'G-AAAAAAAAAA', 'google_analytics.consent_required' => true }
+  def test_consent_mode_sets_denied_defaults_when_ce_has_a_consent_system
+    values = { 'google_analytics.measurement_id' => 'G-AAAAAAAAAA' }
 
-    assert_includes render(platform(values)), "analytics_storage: 'denied'"
-    refute_includes render(platform('google_analytics.measurement_id' => 'G-AAAAAAAAAA')), 'denied'
+    with_consent_system(true) { assert_includes render(platform(values)), "analytics_storage: 'denied'" }
+    with_consent_system(false) { refute_includes render(platform(values)), 'denied' }
   end
 
   def test_anonymize_ip_defaults_on_and_dnt_is_opt_in
@@ -125,32 +129,72 @@ class BetterTogetherGoogleAnalyticsPerPlatformTest < Minitest::Test
 end
 
 class BetterTogetherGoogleAnalyticsConsentTest < Minitest::Test
+  include ConsentSystemHelper
+
+  ID = 'google_analytics.measurement_id'
+
   def platform(values)
     FakePlatform::SettingPlatform.new(values)
   end
 
-  def test_consent_provider_needs_an_id_and_the_flag
+  def test_provider_returns_analytics_only_for_a_platform_with_an_id
     tags = BetterTogether::GoogleAnalytics::HeadTags
-    id = 'google_analytics.measurement_id'
-    flag = 'google_analytics.consent_required'
 
-    assert tags.consent_needed?(platform(id => 'G-AAAAAAAAAA', flag => true))
-    refute tags.consent_needed?(platform(id => 'G-AAAAAAAAAA'))
-    refute tags.consent_needed?(platform(flag => true))
+    assert_equal :analytics, tags.consent_categories(platform(ID => 'G-AAAAAAAAAA'))
+    assert_equal false, tags.consent_categories(platform({}))
+    assert_equal false, tags.consent_categories(platform(ID => 'UA-1'))
   end
 
-  def test_consent_mode_updates_from_the_banner_event
-    js = BetterTogether::GoogleAnalytics::HeadTags.bootstrap_js('G-AAAAAAAAAA', consent_required: true)
+  def test_registered_provider_asks_for_analytics_only_when_an_id_exists
+    registered = nil
+    stub_registry(:register_consent_provider, ->(key, &block) { registered = [key, block] }) do
+      BetterTogether::GoogleAnalytics.register_consent!
+    end
+
+    assert_equal :google_analytics, registered[0]
+    assert_equal :analytics, registered[1].call(platform(ID => 'G-AAAAAAAAAA'))
+    assert_equal false, registered[1].call(platform({}))
+  end
+
+  def test_consent_mode_reacts_to_the_event_and_the_stored_cookie
+    js = BetterTogether::GoogleAnalytics::HeadTags.bootstrap_js('G-AAAAAAAAAA', consent_required: true,
+                                                                                policy_version: 'abc123')
 
     assert_includes js, "gtag('consent', 'default'"
     assert_includes js, "addEventListener('better_together:consent'"
-    assert_includes js, "analytics_storage: c.analytics ? 'granted' : 'denied'"
+    assert_includes js, 'analytics_storage: c.analytics'
     assert_includes js, 'ad_personalization: c.marketing'
+    assert_includes js, 'bt_consent='
+    assert_includes js, 'var policyVersion = "abc123";'
   end
 
-  def test_no_consent_code_when_not_required
+  def test_default_is_set_before_the_cookie_update_and_before_config
+    js = BetterTogether::GoogleAnalytics::HeadTags.bootstrap_js('G-AAAAAAAAAA', consent_required: true)
+
+    assert_operator js.index("gtag('consent', 'default'"), :<, js.index("gtag('consent', 'update'")
+    assert_operator js.index("gtag('consent', 'update'"), :<, js.index("gtag('config'")
+  end
+
+  def test_no_consent_code_when_consent_mode_is_off
     js = BetterTogether::GoogleAnalytics::HeadTags.bootstrap_js('G-AAAAAAAAAA')
 
     refute_includes js, 'better_together:consent'
+  end
+
+  def test_policy_version_comes_from_the_view_when_available
+    view = Struct.new(:v) { def consent_policy_version(_platform) = v }.new('pv9')
+
+    with_consent_system(true) do
+      assert_equal 'pv9', BetterTogether::GoogleAnalytics::HeadTags.policy_version(view, nil)
+    end
+    with_consent_system(false) do
+      assert_nil BetterTogether::GoogleAnalytics::HeadTags.policy_version(view, nil)
+    end
+  end
+
+  def test_cookie_list_names_the_property_cookie_after_the_measurement_id
+    names = BetterTogether::GoogleAnalytics.cookie_list(platform(ID => 'G-ABCD1234')).map { |c| c[:name] }
+
+    assert_equal %w[_ga _ga_ABCD1234], names
   end
 end

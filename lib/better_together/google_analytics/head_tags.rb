@@ -5,7 +5,7 @@ require 'json'
 
 module BetterTogether
   module GoogleAnalytics
-    module HeadTags # rubocop:disable Metrics/ModuleLength
+    module HeadTags
       module_function
 
       ID_FORMAT = /\A(G|GT|GTM)-[A-Z0-9]{4,}\z/
@@ -17,7 +17,7 @@ module BetterTogether
         return unless gtag_id && render_for?(view_context, platform)
 
         nonce = view_context.content_security_policy_nonce
-        options = tag_options(platform)
+        options = tag_options(platform).merge(policy_version: policy_version(view_context, platform))
         tags = []
         tags << view_context.javascript_include_tag(
           "https://www.googletagmanager.com/gtag/js?id=#{ERB::Util.url_encode(gtag_id)}",
@@ -46,9 +46,27 @@ module BetterTogether
         platform.integration_setting("google_analytics.#{field}")
       end
 
-      # CE asks this to decide whether to show the consent banner.
-      def consent_needed?(platform)
-        !measurement_id(platform).nil? && flag(platform, 'consent_required')
+      # Consent categories this gem needs on a platform: analytics when it has a measurement id,
+      # nothing otherwise (so no banner appears for a platform that does not use Google Analytics).
+      def consent_categories(platform)
+        measurement_id(platform) ? :analytics : false
+      end
+
+      # Consent mode is on whenever CE's consent system exists, because the provider then asks
+      # visitors; without that system nobody could ever grant, so tracking would stay denied.
+      def consent_mode?
+        BetterTogether.respond_to?(:register_consent_provider)
+      end
+
+      # The policy version the visitor's decision must match (same value CE writes into bt_consent).
+      def policy_version(view_context, platform)
+        return unless consent_mode?
+
+        if view_context.respond_to?(:consent_policy_version)
+          view_context.consent_policy_version(platform)
+        elsif defined?(BetterTogether::Consent)
+          BetterTogether::Consent.policy_version(platform)
+        end
       end
 
       def flag(platform, field, default: false)
@@ -59,7 +77,7 @@ module BetterTogether
       def tag_options(platform)
         { anonymize_ip: flag(platform, 'anonymize_ip', default: true),
           respect_dnt: flag(platform, 'respect_dnt'),
-          consent_required: flag(platform, 'consent_required') }
+          consent_required: consent_mode? }
       end
 
       def render_for?(view_context, platform)
@@ -79,21 +97,33 @@ module BetterTogether
         user.respond_to?(:permitted_to?) && user.permitted_to?('manage_platform', platform)
       end
 
-      # Consent mode v2: denied by default, then updated from CE's consent banner (the
-      # bt_consent cookie at load, and the better_together:consent event after a choice).
-      def consent_js
+      # Consent mode v2: everything denied by default, then updated from the visitor's decision.
+      # The decision is read synchronously from the bt_consent cookie (CE rewrites it from the
+      # signed-in person's stored choice before rendering, and discards it when the policy version
+      # changed), so a returning visitor who agreed never flashes a denied state. Later choices from
+      # the banner or the settings form arrive as the better_together:consent event.
+      def consent_js(policy_version = nil)
         <<~JS.strip
           gtag('consent', 'default', { ad_storage: 'denied', ad_user_data: 'denied', ad_personalization: 'denied', analytics_storage: 'denied', wait_for_update: 500 });
-          window.addEventListener('better_together:consent', function(event) {
-            var c = (event && event.detail) || {};
-            gtag('consent', 'update', {
-              analytics_storage: c.analytics ? 'granted' : 'denied',
-              ad_storage: c.marketing ? 'granted' : 'denied',
-              ad_user_data: c.marketing ? 'granted' : 'denied',
-              ad_personalization: c.marketing ? 'granted' : 'denied'
-            });
-          });
-          if (window.btConsent) { window.dispatchEvent(new CustomEvent('better_together:consent', { detail: window.btConsent })); }
+          (function() {
+            var policyVersion = #{policy_version.to_json};
+            function update(c) {
+              c = c || {};
+              gtag('consent', 'update', {
+                analytics_storage: c.analytics ? 'granted' : 'denied',
+                ad_storage: c.marketing ? 'granted' : 'denied',
+                ad_user_data: c.marketing ? 'granted' : 'denied',
+                ad_personalization: c.marketing ? 'granted' : 'denied'
+              });
+            }
+            try {
+              var match = document.cookie.match(/(?:^|; )bt_consent=([^;]*)/);
+              var saved = match ? JSON.parse(decodeURIComponent(match[1])) : null;
+              if (saved && saved.v === 1 && (!policyVersion || saved.pv === policyVersion)) update(saved);
+            } catch (e) {}
+            window.addEventListener('better_together:consent', function(event) { update(event && event.detail); });
+            if (window.btConsent) update(window.btConsent);
+          })();
         JS
       end
 
@@ -101,14 +131,14 @@ module BetterTogether
         %(if (navigator.doNotTrack === "1" || window.doNotTrack === "1") { window["ga-disable-" + #{gtag_id.to_json}] = true; })
       end
 
-      def bootstrap_js(gtag_id, anonymize_ip: true, respect_dnt: false, consent_required: false)
+      def bootstrap_js(gtag_id, anonymize_ip: true, respect_dnt: false, consent_required: false, policy_version: nil)
         config = { anonymize_ip: anonymize_ip }.to_json
         <<~JS
           window.GA_ID = #{gtag_id.to_json};
           window.dataLayer = window.dataLayer || [];
           function gtag(){dataLayer.push(arguments);}
           #{dnt_js(gtag_id) if respect_dnt}
-          #{consent_js if consent_required}
+          #{consent_js(policy_version) if consent_required}
           gtag('js', new Date());
           gtag('config', #{gtag_id.to_json}, #{config});
           window.addEventListener('better_together:share', function(event) {
