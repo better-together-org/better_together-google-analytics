@@ -123,3 +123,34 @@ class BetterTogetherGoogleAnalyticsPerPlatformTest < Minitest::Test
                                     'google_analytics.respect_dnt' => true)), 'doNotTrack'
   end
 end
+
+class BetterTogetherGoogleAnalyticsConsentTest < Minitest::Test
+  def platform(values)
+    FakePlatform::SettingPlatform.new(values)
+  end
+
+  def test_consent_provider_needs_an_id_and_the_flag
+    tags = BetterTogether::GoogleAnalytics::HeadTags
+    id = 'google_analytics.measurement_id'
+    flag = 'google_analytics.consent_required'
+
+    assert tags.consent_needed?(platform(id => 'G-AAAAAAAAAA', flag => true))
+    refute tags.consent_needed?(platform(id => 'G-AAAAAAAAAA'))
+    refute tags.consent_needed?(platform(flag => true))
+  end
+
+  def test_consent_mode_updates_from_the_banner_event
+    js = BetterTogether::GoogleAnalytics::HeadTags.bootstrap_js('G-AAAAAAAAAA', consent_required: true)
+
+    assert_includes js, "gtag('consent', 'default'"
+    assert_includes js, "addEventListener('better_together:consent'"
+    assert_includes js, "analytics_storage: c.analytics ? 'granted' : 'denied'"
+    assert_includes js, 'ad_personalization: c.marketing'
+  end
+
+  def test_no_consent_code_when_not_required
+    js = BetterTogether::GoogleAnalytics::HeadTags.bootstrap_js('G-AAAAAAAAAA')
+
+    refute_includes js, 'better_together:consent'
+  end
+end

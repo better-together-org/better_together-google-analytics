@@ -5,7 +5,7 @@ require 'json'
 
 module BetterTogether
   module GoogleAnalytics
-    module HeadTags
+    module HeadTags # rubocop:disable Metrics/ModuleLength
       module_function
 
       ID_FORMAT = /\A(G|GT|GTM)-[A-Z0-9]{4,}\z/
@@ -46,6 +46,11 @@ module BetterTogether
         platform.integration_setting("google_analytics.#{field}")
       end
 
+      # CE asks this to decide whether to show the consent banner.
+      def consent_needed?(platform)
+        !measurement_id(platform).nil? && flag(platform, 'consent_required')
+      end
+
       def flag(platform, field, default: false)
         value = platform_setting(platform, field)
         value.nil? ? default : value == true
@@ -74,6 +79,24 @@ module BetterTogether
         user.respond_to?(:permitted_to?) && user.permitted_to?('manage_platform', platform)
       end
 
+      # Consent mode v2: denied by default, then updated from CE's consent banner (the
+      # bt_consent cookie at load, and the better_together:consent event after a choice).
+      def consent_js
+        <<~JS.strip
+          gtag('consent', 'default', { ad_storage: 'denied', ad_user_data: 'denied', ad_personalization: 'denied', analytics_storage: 'denied', wait_for_update: 500 });
+          window.addEventListener('better_together:consent', function(event) {
+            var c = (event && event.detail) || {};
+            gtag('consent', 'update', {
+              analytics_storage: c.analytics ? 'granted' : 'denied',
+              ad_storage: c.marketing ? 'granted' : 'denied',
+              ad_user_data: c.marketing ? 'granted' : 'denied',
+              ad_personalization: c.marketing ? 'granted' : 'denied'
+            });
+          });
+          if (window.btConsent) { window.dispatchEvent(new CustomEvent('better_together:consent', { detail: window.btConsent })); }
+        JS
+      end
+
       def dnt_js(gtag_id)
         %(if (navigator.doNotTrack === "1" || window.doNotTrack === "1") { window["ga-disable-" + #{gtag_id.to_json}] = true; })
       end
@@ -85,7 +108,7 @@ module BetterTogether
           window.dataLayer = window.dataLayer || [];
           function gtag(){dataLayer.push(arguments);}
           #{dnt_js(gtag_id) if respect_dnt}
-          #{"gtag('consent', 'default', { ad_storage: 'denied', ad_user_data: 'denied', ad_personalization: 'denied', analytics_storage: 'denied' });" if consent_required}
+          #{consent_js if consent_required}
           gtag('js', new Date());
           gtag('config', #{gtag_id.to_json}, #{config});
           window.addEventListener('better_together:share', function(event) {
