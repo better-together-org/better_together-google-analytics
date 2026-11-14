@@ -46,7 +46,7 @@ class BetterTogetherGoogleAnalyticsHeadTagsTest < Minitest::Test
     assert_includes rendered, 'https://www.googletagmanager.com/gtag/js?id=G-TEST123'
     assert_includes rendered, 'nonce="nonce-123"'
     assert_includes rendered, 'window.GA_ID = "G-TEST123";'
-    assert_includes rendered, 'gtag(\'config\', "G-TEST123", {"anonymize_ip":true});'
+    assert_includes rendered, 'gtag(\'config\', "G-TEST123", {"anonymize_ip":true,"send_page_view":false});'
     assert_includes rendered, "window.addEventListener('better_together:share'"
   end
 end
@@ -196,5 +196,52 @@ class BetterTogetherGoogleAnalyticsConsentTest < Minitest::Test
     names = BetterTogether::GoogleAnalytics.cookie_list(platform(ID => 'G-ABCD1234')).map { |c| c[:name] }
 
     assert_equal %w[_ga _ga_ABCD1234], names
+  end
+end
+
+class BetterTogetherGoogleAnalyticsTrackingExclusionTest < Minitest::Test
+  HeadTags = BetterTogether::GoogleAnalytics::HeadTags
+
+  class View < BetterTogetherGoogleAnalyticsHeadTagsTest::FakeViewContext
+    def initialize(allowed)
+      super('n')
+      @allowed = allowed
+    end
+
+    def third_party_tracking_allowed? = @allowed
+  end
+
+  def render_with(view)
+    ENV['GTAG_ID'] = 'G-TEST123'
+    HeadTags.render(view)
+  ensure
+    ENV.delete('GTAG_ID')
+  end
+
+  def test_nothing_is_rendered_when_the_page_is_excluded
+    assert_nil render_with(View.new(false))
+  end
+
+  def test_rendered_when_the_page_is_allowed
+    assert_includes render_with(View.new(true)), 'gtag/js?id=G-TEST123'
+  end
+
+  def test_engines_without_the_helper_still_render
+    assert_includes render_with(BetterTogetherGoogleAnalyticsHeadTagsTest::FakeViewContext.new('n')), 'gtag/js'
+  end
+
+  def test_page_views_check_the_meta_tag_and_strip_secrets
+    js = HeadTags.bootstrap_js('G-TEST123')
+
+    assert_includes js, 'bt-third-party-tracking'
+    assert_includes js, 'turbo:before-visit'
+    assert_includes js, 'turbo:load'
+    assert_includes js, 'reset_password_token'
+    assert_includes js, "gtag('event', 'page_view'"
+  end
+
+  def test_do_not_track_flag_is_only_set_when_requested
+    assert_includes HeadTags.bootstrap_js('G-TEST123', respect_dnt: true), 'var dnt = (navigator.doNotTrack'
+    assert_includes HeadTags.bootstrap_js('G-TEST123'), 'var dnt = false;'
   end
 end
