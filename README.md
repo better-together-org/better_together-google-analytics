@@ -1,17 +1,63 @@
 # Better Together Google Analytics
 
-Provider gem for adding Google Analytics 4 (`gtag.js`) support to Better Together host apps without duplicating inline head markup in each app.
+Adds Google Analytics 4 (`gtag.js`) to a [Community Engine](https://github.com/better-together-org/community-engine-rails) host app, with each platform using its own measurement ID and with visitor consent respected.
 
-The gem also listens for CE's generic `better_together:share` browser event so social-share analytics stay in the GA provider layer instead of CE core.
+## What it is for
 
-## Configuration
+- **One analytics property per platform.** A host app can serve several platforms (for example a main site and hosted community sites). Each platform stewards enter their own Measurement ID; platforms without one send nothing.
+- **Consent first.** The gem registers an `analytics` consent category and sets Google consent mode v2 (denied by default, updated from the visitor's choice). It also adds `_ga` cookies to the platform's cookie policy page, only where analytics is on.
+- **Privacy options** per platform: anonymize IP, respect Do Not Track, skip staging hosts, skip platform stewards.
+- **Share tracking.** It listens for Community Engine's `better_together:share` browser event so social shares are reported without analytics code in CE core.
+- **No inline markup in the host app.** Replaces the hand-written GA partial that host apps used to carry.
 
-Requires a Community Engine version with `BetterTogether.register_platform_setting` (the platform Integrations tab). Each platform sets its own values there:
+## Where you configure it
 
-- Measurement ID (`G-`, `GT-` or `GTM-`). Blank turns analytics off for that platform.
-- Anonymize IP addresses (on by default), respect Do Not Track, track staging hosts, skip platform stewards.
+Platform stewards open **Edit platform, Integrations**. The Google Analytics group appears there once the gem is installed (the Sentry group in the screenshot comes from [better_together-sentry](https://github.com/better-together-org/better_together-sentry)).
 
-`GTAG_ID` still works as a fallback for the host platform only, so existing apps keep working. Other platforms never inherit it. Google origins stay registered in the CSP allow-list, but no tag is emitted for a platform without an id.
+![Platform edit form, Integrations tab, with the Google Analytics fields](docs/images/platform-integrations-tab.png)
+
+On a phone the same tab stacks into one column:
+
+![Integrations tab on mobile](docs/images/platform-integrations-tab-mobile.png)
+
+The screenshots use example values only.
+
+## Requirements
+
+- Community Engine `>= 0.11.0` with the platform Integrations tab (`BetterTogether.register_platform_setting`) and the consent system (`register_consent_provider`, `register_cookie_policy_segment`). On older engines the gem still loads but skips the parts the engine does not support.
+- Ruby `>= 3.2`.
+
+## Installing in a host app
+
+1. Add the gem to the host app's `Gemfile`:
+
+   ```ruby
+   gem 'better_together-google-analytics', github: 'better-together-org/better_together-google-analytics', branch: 'main'
+   ```
+
+   Pin a `tag:` or `ref:` for production. While developing locally you can use `path: '../better_together-google-analytics'`.
+
+2. Install and restart:
+
+   ```bash
+   bundle install
+   ```
+
+   There are no migrations and no generators. The gem registers itself when Rails boots.
+
+3. Remove the old inline GA partial (`app/views/layouts/better_together/_custom_head_javascript.html.erb` or similar) if the app has one, otherwise the tag is sent twice.
+
+4. Sign in as a platform steward, open **Edit platform, Integrations**, enter the Measurement ID (`G-`, `GT-` or `GTM-`) and save. Repeat per platform.
+
+5. Check it: load a public page and confirm the `gtag/js?id=...` script is in the page head, then accept analytics in the consent banner and watch Realtime in Google Analytics. Without consent the page sends no hit.
+
+### Upgrading an app that used `GTAG_ID`
+
+`GTAG_ID` still works as a fallback for the **host platform only**; other platforms never inherit it. Move the value into the Integrations form when convenient and then remove the environment variable.
+
+### Content Security Policy
+
+The gem adds the Google origins (`googletagmanager.com`, `google-analytics.com`, `region1.google-analytics.com`) to the engine's CSP allow-list. Add them to a platform's own CSP settings only if that platform overrides the global policy.
 
 ## Consent and cookie policy
 
