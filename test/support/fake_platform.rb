@@ -22,3 +22,12 @@ module FakePlatform
     Platform.new(name: 'Host', host: true, settings: {})
   end
 end
+
+# Platform stand-in answering integration_setting like CE's registry-backed method.
+module FakePlatform
+  class SettingPlatform
+    def initialize(values = {}) = @values = values
+
+    def integration_setting(key) = @values[key]
+  end
+end
